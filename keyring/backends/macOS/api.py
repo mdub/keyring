@@ -18,6 +18,7 @@ class error:
     item_not_found = -25300
     keychain_denied = -128
     sec_auth_failed = -25293
+    sec_param = -50
     plist_missing = -67030
     sec_interaction_not_allowed = -25308
 
@@ -56,6 +57,10 @@ SecItemCopyMatching.argtypes = (c_void_p, c_void_p)
 SecItemDelete = _sec.SecItemDelete
 SecItemDelete.restype = OS_status
 SecItemDelete.argtypes = (c_void_p,)
+
+SecItemUpdate = _sec.SecItemUpdate
+SecItemUpdate.restype = OS_status
+SecItemUpdate.argtypes = (c_void_p, c_void_p)
 
 CFDataGetBytePtr = _found.CFDataGetBytePtr
 CFDataGetBytePtr.restype = c_void_p
@@ -123,6 +128,8 @@ class Error(Exception):
                 "Security Auth Failure: make sure "
                 "executable is signed with codesign util",
             )
+        if status == error.sec_param:
+            raise InvalidParametersError(status, "Invalid parameters")
         raise cls(status, "Unknown Error")
 
 
@@ -135,6 +142,10 @@ class KeychainDenied(Error):
 
 
 class SecAuthFailure(Error):
+    pass
+
+
+class InvalidParametersError(Error):
     pass
 
 
@@ -159,18 +170,18 @@ def find_generic_password(kc_name, service, username, not_found_ok=False):
 
 
 def set_generic_password(name, service, username, password):
+    # Try to update in place first. This preserves the keychain item's
+    # access control list (ACL), avoiding repeated "Keychain Access"
+    # prompts on macOS when the item is later read.
+    try:
+        _update_generic_password(service, username, password)
+        return
+    except (NotFound, InvalidParametersError):
+        pass
+    # Fall back to delete+add if update fails, e.g. because the item doesn't exist.
     with contextlib.suppress(NotFound):
         delete_generic_password(name, service, username)
-
-    q = create_query(
-        kSecClass=k_('kSecClassGenericPassword'),
-        kSecAttrService=service,
-        kSecAttrAccount=username,
-        kSecValueData=password,
-    )
-
-    status = SecItemAdd(q, None)
-    Error.raise_for_status(status)
+    _add_generic_password(service, username, password)
 
 
 def delete_generic_password(name, service, username):
@@ -181,4 +192,28 @@ def delete_generic_password(name, service, username):
     )
 
     status = SecItemDelete(q)
+    Error.raise_for_status(status)
+
+
+def _add_generic_password(service, username, password):
+    q = create_query(
+        kSecClass=k_('kSecClassGenericPassword'),
+        kSecAttrService=service,
+        kSecAttrAccount=username,
+        kSecValueData=password,
+    )
+    status = SecItemAdd(q, None)
+    Error.raise_for_status(status)
+
+
+def _update_generic_password(service, username, password):
+    query = create_query(
+        kSecClass=k_('kSecClassGenericPassword'),
+        kSecAttrService=service,
+        kSecAttrAccount=username,
+    )
+    update_attrs = create_query(
+        kSecValueData=password,
+    )
+    status = SecItemUpdate(query, update_attrs)
     Error.raise_for_status(status)
