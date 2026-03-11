@@ -177,11 +177,10 @@ def set_generic_password(name, service, username, password):
         _update_generic_password(service, username, password)
         return
     except (NotFound, InvalidParametersError):
-        pass
-    # Fall back to delete+add if update fails, e.g. because the item doesn't exist.
-    with contextlib.suppress(NotFound):
-        delete_generic_password(name, service, username)
-    _add_generic_password(service, username, password)
+        # Fall back to delete+add if update fails, e.g. because the item doesn't exist.
+        with contextlib.suppress(NotFound):
+            delete_generic_password(name, service, username)
+        _add_generic_password(service, username, password)
 
 
 def delete_generic_password(name, service, username):
